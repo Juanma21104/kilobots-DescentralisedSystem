@@ -1,5 +1,5 @@
 import random, math
-from constant import KILOBOTS_X, KILOBOTS_Y
+from constant import KILOBOTS_X, KILOBOTS_Y, R3_ANIMATION
 
 class RoutineR1:
 
@@ -10,6 +10,15 @@ class RoutineR1:
         """If I hear a neighbor with MY same ID and different randomNumber, I change mine"""
 
         for msg in self.inbox:
+            isAdded = False
+            for neighbor in self.neighbor_ids_randomNum:
+                if neighbor['id'] == msg['content']['sender_id']:
+                    isAdded = True
+            if not isAdded:
+                self.neighbor_ids_randomNum.append({
+                    'id': msg['content']['sender_id'],
+                    'randomNumber': msg['content']['randomNumber']
+                })
             # If a hear a neighbor with my ID but different randomNumber -> choose new ID and add current to blacklist
             if (msg['content']['sender_id'] == self.my_id and msg['content']['randomNumber'] != self.randomNumber):
                 self.blacklist_ids.append(self.my_id)
@@ -94,6 +103,17 @@ class RoutineR1:
             self.role = "BORDER"
             self.led_color = "blue"  # Blue color
 
+        for msg in self.filter_neighbors_message():
+            if isinstance(msg['content'], dict):
+                neighborID = msg['content']['id']
+                exist = any(d["id"] == neighborID for d in self.neighbor_roles)
+                if not exist:
+                    self.neighbor_roles.append({
+                        'id': neighborID,
+                        'role': msg['content']['role']
+                    })
+
+
 
 class RoutineR2:
     def run_sr2a_origin_assignment(self):
@@ -101,15 +121,16 @@ class RoutineR2:
         
         for msg in self.filter_neighbors_message():
             received_num = msg['content']
-            if self.role != "CORNER": 
-                if received_num is not None and received_num < self.numOriginAssigment:
-                    self.numOriginAssigment = received_num
-                    self.led_color = "pink"  # Pink indicates that I updated my number
-            elif self.role == "CORNER":
-                if self.numOriginAssigment == received_num: # If corner receives its own number, 
-                    self.led_color = "black"                # it will be the origin at the end of the phase 
-                else:
-                    self.led_color = "purple"
+            if isinstance(received_num, int):
+                if self.role != "CORNER": 
+                    if received_num is not None and received_num < self.numOriginAssigment:
+                        self.numOriginAssigment = received_num
+                        self.led_color = "pink"  # Pink indicates that I updated my number
+                elif self.role == "CORNER":
+                    if self.numOriginAssigment == received_num: # If corner receives its own number, 
+                        self.led_color = "black"                # it will be the origin at the end of the phase 
+                    else:
+                        self.led_color = "purple"
 
 
     def setOriginAssignment(self):
@@ -151,8 +172,13 @@ class RoutineR2:
         # BORDER robots update their count message if they have count = 0 and have received a message
         if self.count == 0 and self.role == "BORDER" and not self.position:
             for msg in self.filter_neighbors_message():
-                if msg['content']:
+                if msg['content'] and not ("corner_id" in msg['content']):
                     content = msg['content']
+                    self.messageFromCorner = False
+                    for robot in self.neighbor_roles:
+                        if robot['id'] == msg["sender_id"] and robot['role'] == "CORNER":
+                            self.messageFromCorner = True
+                            
                     self.count = content['count'] + 1
                     self.countMessage = content
                     self.led_color = "lightblue" # Indicate that I have updated my count
@@ -160,12 +186,12 @@ class RoutineR2:
         # The same to CORNER robots
         elif self.count == 0 and self.role == "CORNER" and not self.position:
             for msg in self.filter_neighbors_message():
-                if msg['content']:
+                if msg['content'] and "corner_id" in msg['content']:
                     content = msg['content']
                     self.count = content['count'] + 1
                     self.countMessage = content
         
-        # - Specific cases for positions [1,2] and [1,1]
+                # - Specific cases for positions [1,2] and [1,1]
         # We have to ensure that [1,2] don't update its count from [2,1], so we check the count if it is greater than 2
         elif self.position == [1,2] and self.count == 0:
             for msg in self.filter_neighbors_message():
@@ -181,28 +207,31 @@ class RoutineR2:
                 if msg['content'] and isinstance(msg['content'], dict):
                     content = msg['content']
                     self.count = 1
-                    self.countMessage = content
+                    if content['count'] > 2:
+                        self.countMessage = content
+        
 
     def set_relative_position(self):
         """Set relative position to BORDER and CORNER based on the final count messages"""
 
         # If I am [1,1], I have already the countMessage from the previous phase
-        if self.position == [1,1] and not self.countFullMessage:
+        if self.position == [1,1] and self.countFullMessage is None:
+            #print("Robot", self.my_id, "at [1,1] setting countFullMessage, from countMessage:", self.countMessage)
+            self.countMessage["check"] = True
             self.countFullMessage = self.countMessage
-
-        # If I am [2,1], I only have to update the countFullMessage from [1,1]
-        elif self.position == [2,1]:
-            for msg in self.filter_neighbors_message():
-                if msg['content']:
-                    content = msg['content']
-                    self.countFullMessage = content
         
-        # For other BORDER or CORNER robots, set their position based on the countFullMessage and their count
-        elif not self.position and (self.role == "BORDER" or self.role == "CORNER") and not self.countFullMessage:
+        else:
             for msg in self.filter_neighbors_message():
-                if msg['content']:
-                    content = msg['content']
-                    self.countFullMessage = content
+                if msg['content'] and isinstance(msg['content'], dict) and "check" in msg['content']:
+                    #print("Robot", self.my_id, "at", self.position, "received countFullMessage from neighbor:", msg['content'])
+                    self.countFullMessage = msg['content']
+
+
+        # For other BORDER or CORNER robots, set their position based on the countFullMessage and their count
+        if not self.position and (self.role == "BORDER" or self.role == "CORNER") and not (self.countFullMessage is None):
+            for msg in self.filter_neighbors_message():
+                if msg['content'] and not ("sender_position" in msg):
+                    self.countFullMessage = msg['content']
 
                     if self.countMessage['count'] < self.countFullMessage['C1']:
                         self.position = [self.count, 1]
@@ -212,7 +241,7 @@ class RoutineR2:
                         self.position = [self.countFullMessage['C1'] - (self.count - self.countFullMessage['C2']), self.countFullMessage['C2'] - self.countFullMessage['C1'] + 1]
                     else:
                         self.position = [1, (self.countFullMessage['C2'] - self.countFullMessage['C1'] + 1) - (self.count - self.countFullMessage['C3'])]
-                    
+                   
 
     # ---------------------------------------------------------
     # SUBROUTINE SR2C: Position setting
@@ -226,15 +255,15 @@ class RoutineR2:
         if not self.position and self.role == "MIDDLE":
             neighbors_positions = []
             for msg in self.filter_neighbors_message():
-                if msg['content']:
+                if msg['content'] and isinstance(msg['content'], list):
                     neighbors_positions.append(msg['content'])
+            if neighbors_positions:
+                # Check if I can determine my position (coordinates x or y) based on neighbors' positions
+                self.check_position(neighbors_positions)
 
-            # Check if I can determine my position (coordinates x or y) based on neighbors' positions
-            self.check_position(neighbors_positions)
-
-            # If x or y in auxPosition is set, update my position
-            if self.auxPosition[0] != -1 and self.auxPosition[1] != -1:
-                self.position = self.auxPosition
+                # If x or y in auxPosition is set, update my position
+                if self.auxPosition[0] != -1 and self.auxPosition[1] != -1:
+                    self.position = self.auxPosition
 
 
 class RoutineR3:
@@ -244,7 +273,7 @@ class RoutineR3:
             return
 
         # Calculate the start time of the animation for this kilobot
-        start_time = 760
+        start_time = 480
         
         # Calculate how much time has passed since the start of the animation
         elapsed = self.internal_clock - start_time
@@ -272,9 +301,12 @@ class RoutineR3:
 
     def set_role_color(self):
         """Choose the function to display"""
-        #self.smiley_face() # 10x10
-        self.setDiagonalWaveAnimation()
-        #self.setWaspAnimation() # 30x30
+        if R3_ANIMATION == "smiley_face":
+            self.smiley_face() # 10x10
+        elif R3_ANIMATION == "diagonal_wave":
+            self.setDiagonalWaveAnimation() # Any size
+        elif R3_ANIMATION == "wasp":
+            self.setWaspAnimation() # 30x30
     
     def smiley_face(self):
         """

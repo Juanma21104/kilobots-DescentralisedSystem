@@ -1,10 +1,14 @@
 # --- Parameters ---
-KILOBOTS_X = 20 # Number of kilobots in X direction
-KILOBOTS_Y = 20 # Number of kilobots in Y direction
+KILOBOTS_X = 10 # Number of kilobots in X direction
+KILOBOTS_Y = 10 # Number of kilobots in Y direction
 GRID_SIZE = 60   # Size of each grid cell
 IR_ERROR = 0.02 # Error in IR 2%
-FAILURE_PROB = 0 # Probability of kilobot failure 1%
+FAILURE_PROB = 0.001 # Probability of kilobot failure 0.1%
+LOST_MESSAGE_PROB = 0.10 # Probability of lost message 10%
 SEPARATION = 1  # Separation between kilobots in grid cells
+
+R3_ANIMATION = "diagonal_wave" # Selected animation for routine 3
+                  # Options: "diagonal_wave", "wasp", "smiley_face"
 
 # --- Robot's states ---
 class State:
