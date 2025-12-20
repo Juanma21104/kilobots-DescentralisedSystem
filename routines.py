@@ -1,5 +1,5 @@
-import random, math
-from constant import KILOBOTS_X, KILOBOTS_Y, R3_ANIMATION
+import random
+from constant import R3_ANIMATION
 
 class RoutineR1:
 
@@ -172,8 +172,8 @@ class RoutineR2:
         # BORDER robots update their count message if they have count = 0 and have received a message
         if self.count == 0 and self.role == "BORDER" and not self.position:
             for msg in self.filter_neighbors_message():
-                if msg['content'] and not ("corner_id" in msg['content']):
-                    content = msg['content']
+                content = msg['content']
+                if isinstance(content, dict) and "count" in content and not ("corner_id" in content):   
                     self.messageFromCorner = False
                     for robot in self.neighbor_roles:
                         if robot['id'] == msg["sender_id"] and robot['role'] == "CORNER":
@@ -186,17 +186,18 @@ class RoutineR2:
         # The same to CORNER robots
         elif self.count == 0 and self.role == "CORNER" and not self.position:
             for msg in self.filter_neighbors_message():
-                if msg['content'] and "corner_id" in msg['content']:
+                content = msg['content']
+                if isinstance(content, dict) and "count" in content and "corner_id" in content:
                     content = msg['content']
                     self.count = content['count'] + 1
-                    self.countMessage = content
+                    self.countMessage = content                
         
                 # - Specific cases for positions [1,2] and [1,1]
         # We have to ensure that [1,2] don't update its count from [2,1], so we check the count if it is greater than 2
         elif self.position == [1,2] and self.count == 0:
             for msg in self.filter_neighbors_message():
-                if msg['content'] and isinstance(msg['content'], dict):
-                    content = msg['content']
+                content = msg['content']
+                if isinstance(content, dict) and "count" in content:
                     if content['count'] > 2:
                         self.count = content['count'] + 1
                         self.countMessage = content
@@ -204,10 +205,11 @@ class RoutineR2:
         # If count message is from [1,2] to [1,1] updates its count and the final countMessage
         elif self.position == [1,1]:
             for msg in self.filter_neighbors_message():
-                if msg['content'] and isinstance(msg['content'], dict):
+                content = msg['content']
+                if isinstance(content, dict) and "count" in content:
                     content = msg['content']
                     self.count = 1
-                    if content['count'] > 2:
+                    if content['count'] > 3:
                         self.countMessage = content
         
 
@@ -253,13 +255,12 @@ class RoutineR2:
 
         # If I am MIDDLE and I don't have position yet, check neighbors' positions to determine mine
         if not self.position and self.role == "MIDDLE":
-            neighbors_positions = []
             for msg in self.filter_neighbors_message():
                 if msg['content'] and isinstance(msg['content'], list):
-                    neighbors_positions.append(msg['content'])
-            if neighbors_positions:
+                    self.neighbor_positions.append(msg['content'])
+            if self.neighbor_positions:
                 # Check if I can determine my position (coordinates x or y) based on neighbors' positions
-                self.check_position(neighbors_positions)
+                self.check_position(self.neighbor_positions)
 
                 # If x or y in auxPosition is set, update my position
                 if self.auxPosition[0] != -1 and self.auxPosition[1] != -1:

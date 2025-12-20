@@ -1,13 +1,14 @@
 from mesa import Agent
 import numpy as np
 import random, math
-from constant import State, IR_ERROR, FAILURE_PROB
+from constant import State
 from routines import RoutineR1, RoutineR2, RoutineR3
 
 class Kilobot(Agent, RoutineR1, RoutineR2, RoutineR3):
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
         self.state = State.SR1A_ID_ASSIGNMENT # Initial state
+        self.messages_sent_count = 0
         self.led_color = "grey"   # Initial color
         self.role = "UNDECIDED"   # Roles: CORNER, BORDER, MIDDLE
         self.isBroken = False  # Determine if the kilobot is broken at initialization
@@ -20,6 +21,7 @@ class Kilobot(Agent, RoutineR1, RoutineR2, RoutineR3):
         self.neighbor_ids = []     # List of neighbor IDs
         self.neighbor_ids_randomNum = [] # List of neighbor IDs and their random numbers
         self.neighbor_roles = []   # Dict to store neighbor ID -> role
+        self.neighbor_positions = [] # List of neighbor positions
         self.blacklist_ids = []    # IDs to avoid in SR1a
         self.min_dist_seen = 9999  # Minimum distance seen in SR1b
         self.numOriginAssigment = 999999  # Number to determine the [1,1] corner 
@@ -43,7 +45,7 @@ class Kilobot(Agent, RoutineR1, RoutineR2, RoutineR3):
 
         if self.internal_clock % 150 == 100:
             # Simulate possible failure
-            if random.random() < FAILURE_PROB:
+            if random.random() < self.model.failure_prob:
                 self.isBroken = True
         if self.isBroken:
             self.led_color = "brown" # Visualmente apagado/muerto
@@ -68,43 +70,43 @@ class Kilobot(Agent, RoutineR1, RoutineR2, RoutineR3):
             self.state = State.SR1A_ID_ASSIGNMENT # Assign IDs (SR1a)
             self.led_color = "grey"
 
-        elif self.internal_clock == 25:
+        elif self.internal_clock == 60:
             self.state = State.SR1B_NEIGHBOR_LIST # Create neighbor list (SR1b)
             self.led_color = "lightblue"
             
-        elif self.internal_clock == 45:
+        elif self.internal_clock == 140:
             self.state = State.SR1C_ROLE_ID # Collect neighbor counts (SR1c phase 1)
             self.led_color = "orange"
             
-        elif self.internal_clock == 75:
+        elif self.internal_clock == 180:
             self.state = State.SR1C_SET_ROLE # Determine role (SR1c phase 2)
 
         # ROUTINE R2
-        elif self.internal_clock == 90:
+        elif self.internal_clock == 260:
             self.state = State.SR2A_ORIGIN_ASSIGNMENT # Send assignment numbers from the corners (SR2a phase 1)
             self.led_color = "grey"
 
-        elif self.internal_clock == 150:
+        elif self.internal_clock == 320:
             self.state = State.SR2A_SET_ORIGIN        # The lower corner number becomes [1,1] (SR2a phase 2)
 
-        elif self.internal_clock == 180:
+        elif self.internal_clock == 370:
             self.state = State.SR2A_ORIGIN_SET_POSITION # [1,1] sends positions to BORDER and MIDDLE neighbors (SR2a phase 3)
 
-        elif self.internal_clock == 230:
+        elif self.internal_clock == 400:
             self.state = State.SR2B_SET_REC_DIMENSION # BORDER and CORNER has done the counting (SR2b phase 1)
 
-        elif self.internal_clock == 370:
+        elif self.internal_clock == 970:
             self.state = State.SR2B_SET_RELATIVE_POS  # BORDER and CORNER set their positions (SR2b phase 2)
             self.led_color = "grey"
 
-        elif self.internal_clock == 430:
+        elif self.internal_clock == 1070:
             self.state = State.SR2C_SET_GLOBAL_POS # All robots set their global positions (SR2c)
 
         # ROUTINE R3
-        elif self.internal_clock == 520:
+        elif self.internal_clock == 1270:
             self.state = State.SET_ANIMATION_SINCRONIZATION # Synchronize animation
             
-        elif self.internal_clock == 560:
+        elif self.internal_clock == 1300:
             self.state = State.SET_ROLE_COLOR  # Every robot sets its role according to its position
 
 
@@ -244,6 +246,9 @@ class Kilobot(Agent, RoutineR1, RoutineR2, RoutineR3):
                     elif n['id'] in self.neighbor_ids and n['role'] == "MIDDLE":
                         middle_neighbors.append(n)
 
+                if len(border_neighbors) < 2 or len(middle_neighbors) < 1:
+                    return
+
                 # Border neighbor with lower ID gets position [2,1], other gets [1,2], middle neighbor gets [2,2]
                 if border_neighbors[0]['id'] > border_neighbors[1]['id']:
                     content = [{"id": border_neighbors[1]['id'], "position": [2,1]}, {"id": border_neighbors[0]['id'], "position": [1,2]}, {"id": middle_neighbors[0]['id'], "position": [2,2]}]
@@ -280,20 +285,15 @@ class Kilobot(Agent, RoutineR1, RoutineR2, RoutineR3):
                 # Update C1, C2, C3 in order, if they are 0
                 if self.countMessage['C1'] == 0:
                     self.countMessage['C1'] = self.count
-                elif self.countMessage['C2'] == 0:
+                elif self.countMessage['C2'] == 0 and self.count != self.countMessage['C1']:
                     self.countMessage['C2'] = self.count
-                elif self.countMessage['C3'] == 0:
+                elif self.countMessage['C3'] == 0 and self.count != self.countMessage['C1'] and self.count != self.countMessage['C2']:
                     self.countMessage['C3'] = self.count
                 content = {"count": self.count, "C1": self.countMessage['C1'], "C2": self.countMessage['C2'], "C3": self.countMessage['C3']}
 
             # Second phase: send the message to appropriate neighbors
-            # If I am CORNER and I have count and I have not sent it yet, I send it to my BORDER neighbors
+            # If I am CORNER and I have count and I have not sent it yet, I send it to my neighbors
             if self.role == "CORNER" and self.count > 0 and not self.position:
-                #self.sentCount = True
-                """border_neighbors = []
-                for n in neighbors:
-                    if n.my_id in self.neighbor_ids and n.role == "BORDER":
-                        border_neighbors.append(n)"""
                 for n in neighbors:
                     n.receive_message({
                         "sender_id": self.my_id,
@@ -302,14 +302,6 @@ class Kilobot(Agent, RoutineR1, RoutineR2, RoutineR3):
             
             # Otherwise, if I am BORDER and I have count and I have not sent it yet, I send it to my BORDER or CORNER neighbors
             if self.role == "BORDER" and self.count > 0:
-                """self.sentCount = True
-                border_neighbors = []
-                corner_neighbors = []
-                for n in neighbors:
-                    if n.my_id in self.neighbor_ids and n.role == "BORDER":
-                        border_neighbors.append(n)
-                    elif n.my_id in self.neighbor_ids and n.role == "CORNER":
-                        corner_neighbors.append(n)"""
                 
                 isCornerNeighbor = False
                 corner_id = -1
@@ -322,95 +314,19 @@ class Kilobot(Agent, RoutineR1, RoutineR2, RoutineR3):
                     content = {"corner_id": corner_id, "count": self.count, "C1": self.countMessage['C1'], "C2": self.countMessage['C2'], "C3": self.countMessage['C3']}
                 else:
                     content = {"count": self.count, "C1": self.countMessage['C1'], "C2": self.countMessage['C2'], "C3": self.countMessage['C3']}
-
-                
+    
                 for n in neighbors:
                     n.receive_message({
                         "sender_id": self.my_id,
                         "content": content
                     })
-
-                """# The message is sent to CORNER neighbors only if they have no position yet and count = 0
-                # Or if the count is completed and the neighbor is the [1,1] corner
-                if (corner_neighbors and not corner_neighbors[0].position and corner_neighbors[0].count == 0) or (corner_neighbors and self.count > 2 and corner_neighbors[0].position == [1,1]):
-                    for n in corner_neighbors:
-                        n.receive_message({
-                            "sender_id": self.my_id,
-                            "content": content
-                        }) 
-                # Otherwise, send to BORDER neighbors
-                else:
-                    for n in border_neighbors:
-                        n.receive_message({
-                            "sender_id": self.my_id,
-                            "content": content
-                        })"""
             
             return
     
         elif self.state == State.SR2B_SET_RELATIVE_POS:
-            """
-            # - 3 different cases
 
-            # 1. If I am [1,1], I send the full count message to [2,1]
-            if self.position == [1,1]:
-                for n in neighbors:
-                    n.receive_message({
-                        "sender_id": self.my_id,
-                        "content": self.countFullMessage,
-                        "sender_position": self.position,
-                    })
-                    
-            # 2. If I am [2,1], I send the full count message to BORDER neighbors
-            if (self.position == [2,1] and self.countFullMessage):
-                border_neighbors_ids = []
-                for robot in self.neighbor_roles:
-                    if robot['role'] == "BORDER":
-                        border_neighbors_ids.append(robot['id'])
-
-                border_neighbors = []
-                for n in neighbors:
-                    if n.my_id in self.neighbor_ids and n.role == "BORDER":
-                        border_neighbors.append(n)
-                
-                for n in neighbors:
-                    n.receive_message({
-                        "sender_id": self.my_id,
-                        "content": self.countFullMessage,
-                        "border_id": border_neighbors_ids
-                    })
-
-            # 3. Otherwise, I will send the full count message to BORDER or CORNER neighbors
-            elif (self.position and not self.sentFullCount and self.countFullMessage):
-                self.sentFullCount = True
-                border_neighbors = []
-                corner_neighbors = []
-                for n in neighbors:
-                    if n.my_id in self.neighbor_ids and n.role == "BORDER":
-                        border_neighbors.append(n)
-                    elif n.my_id in self.neighbor_ids and n.role == "CORNER":
-                        corner_neighbors.append(n)
-                
-                # The message will be sent to CORNER neighbors before BORDER neighbors
-                if (corner_neighbors and not corner_neighbors[0].position and not corner_neighbors[0].countFullMessage):
-                    dist = self.calculate_distance(corner_neighbors[0])
-                    corner_neighbors[0].receive_message({
-                        "sender_id": self.my_id,
-                        "content": self.countFullMessage,
-                        "dist": dist # Direct neighbor
-                    })
-                # If no CORNER neighbor to send to, send to BORDER neighbors
-                else:
-                    for n in border_neighbors:
-                        dist = self.calculate_distance(n)
-                        n.receive_message({
-                            "sender_id": self.my_id,
-                            "content": self.countFullMessage,
-                            "dist": dist
-                        })"""
-
+            # If a robot have countFullMessage, it sends it to its neighbors
             if not (self.countFullMessage is None):
-                #print("Robot ", self.my_id, ", position ", self.position, " sending full count message: ", self.countFullMessage)
                 content = self.countFullMessage
                 for n in neighbors:
                     n.receive_message({
@@ -452,10 +368,11 @@ class Kilobot(Agent, RoutineR1, RoutineR2, RoutineR3):
         dx = self.pos[0] - other_agent.pos[0]
         dy = self.pos[1] - other_agent.pos[1]
         dist = math.sqrt(dx*dx + dy*dy)
-        error = np.random.normal(0, IR_ERROR)
+        error = np.random.normal(0, self.model.ir_error)
         dist_with_error = dist + error
         return  dist_with_error
 
     def receive_message(self, message):
-        if random.random() > FAILURE_PROB:
+        if random.random() > self.model.lost_message_prob:
+            self.messages_sent_count += 1
             self.inbox.append(message)
