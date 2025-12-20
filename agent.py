@@ -48,7 +48,7 @@ class Kilobot(Agent, RoutineR1, RoutineR2, RoutineR3):
             if random.random() < self.model.failure_prob:
                 self.isBroken = True
         if self.isBroken:
-            self.led_color = "brown" # Visualmente apagado/muerto
+            self.led_color = "brown" # Dead kilobot color
             return  # Broken kilobots do nothing
 
         self.internal_clock += 1
